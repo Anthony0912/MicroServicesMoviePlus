@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using Service.api.Movie.DBConfig;
 using Service.api.Movie.Entities;
 using Service.api.Movie.HandleErrors;
@@ -32,35 +33,65 @@ namespace Service.api.Movie.Repository
             }
         }
 
-
         public async Task<ERequest<EPagination<List<EMovie>>>> GetMovieWithPagination(EPagination<List<EMovie>> pagination)
         {
             try
             {
-                var movieSort = await _context.Movie.OrderByDescending(o => o.Id).ToListAsync();
-                if (pagination.SortDirection == "asc")
-                {
-                    movieSort = await _context.Movie.ToListAsync();
-                }
+                string sql = string.Format(
+                    "EXEC dbo.Pagination " +
+                    "@TableName = '{0}', " +
+                    "@PageSize = {1}, " +
+                    "@Page = {2}, " +
+                    "@SortDirection = '{3}', " +
+                    "@PropertySortDirection = '{4}', " +
+                    "@ValueFilter = '{5}';",
+                    "Movies",
+                    pagination.PageSize,
+                    pagination.Page,
+                    pagination.SortDirection,
+                    pagination.PropertySortDirection,
+                    pagination.ValueFilter
+                );
 
-                if (string.IsNullOrEmpty(pagination.Filter?.Value))
-                {
-                    pagination.Data = await _context.Movie
-                        .Skip((pagination.Page - 1) * pagination.PageSize)
-                        .Take(pagination.PageSize)
-                        .ToListAsync();
-                }
-                else
-                {
-                    pagination.Data = await _context.Movie
-                        .Where(w => w.Equals(pagination.Filter))
-                        .Skip((pagination.Page - 1) * pagination.PageSize)
-                        .Take(pagination.PageSize)
-                        .ToListAsync();
-                }
+                List<EMovie> Movies = await _context.Movie.FromSqlRaw(sql).ToListAsync();
 
-                var response = _request.Response(StatusCodes.Status200OK, pagination);
+                pagination.Data = Movies;
+
+                pagination = await GetQuantityItemsInTable(pagination);
+
+                var response = _request.Response(StatusCodes.Status201Created, pagination);
                 return response;
+
+            }
+            catch (Exception e)
+            {
+                var error = _request.Response(StatusCodes.Status400BadRequest, "", e.Message);
+                throw new Exception(error.ToString());
+            }
+        }
+
+        protected async Task<EPagination<List<EMovie>>> GetQuantityItemsInTable(EPagination<List<EMovie>> pagination)
+        {
+            try
+            {
+                var response = await _context
+                     .Database
+                     .SqlQueryRaw<int>(
+                      "EXEC dbo.QuantityItemsInTable @TableName, @PropertySortDirection, @ValueFilter;",
+                      new SqlParameter("TableName", "Movies"),
+                      new SqlParameter("PropertySortDirection", pagination.PropertySortDirection),
+                      new SqlParameter("ValueFilter", pagination.ValueFilter)
+                    ).ToListAsync();
+
+                int totalRows = response[0];
+                decimal rounded = Math.Ceiling(totalRows / Convert.ToDecimal(pagination.PageSize));
+                int totalPages = Convert.ToInt32(rounded);
+
+                pagination.PagesQuantity = totalPages;
+                pagination.TotalRows = totalRows;
+
+
+                return pagination;
             }
             catch (Exception e)
             {

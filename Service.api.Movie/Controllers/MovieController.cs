@@ -33,10 +33,6 @@ namespace Service.api.Movie.Controllers
         [HttpPost("getMovieWithPagination")]
         public async Task<ActionResult<ERequest<List<EMovie>>>> GetMovieWithPagination(EPagination<List<EMovie>> pagination)
         {
-            if (!ModelState.IsValid)
-            {
-                return StatusCode(StatusCodes.Status400BadRequest, ModelState);
-            }
             ERequest<EPagination<List<EMovie>>> response = await _movieRepository.GetMovieWithPagination(pagination);
             return Ok(response);
         }
